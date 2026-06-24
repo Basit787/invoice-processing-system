@@ -1,0 +1,70 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: invoice-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-invoice}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-invoice}
+      POSTGRES_DB: ${POSTGRES_DB:-invoices}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - invoice-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-invoice} -d ${POSTGRES_DB:-invoices}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: invoice-api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-invoice}:${POSTGRES_PASSWORD:-invoice}@db:5432/${POSTGRES_DB:-invoices}
+      UPLOAD_DIR: /app/uploads
+      TESSERACT_CMD: /usr/bin/tesseract
+      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-20}
+    volumes:
+      - uploads_data:/app/uploads
+    networks:
+      - invoice-net
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: http://localhost:${API_PORT:-8000}/api
+    container_name: invoice-frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    networks:
+      - invoice-net
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  invoice-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  uploads_data:
